@@ -4,11 +4,15 @@ from __future__ import annotations
 
 import ctypes
 import ctypes.util
+import http.client
 import os
 import signal
 import subprocess
 import sys
 import time
+import urllib.parse
+import urllib.request
+import zlib
 from pathlib import Path
 
 
@@ -313,6 +317,114 @@ def audio_args(a):
     return out
 
 
+PLAYLIST_SUFFIXES = (
+    ".m3u8",
+    ".m3u",
+)
+
+HLS_CONTENT_TYPES = (
+    "mpegurl",
+    "m3u8",
+)
+
+SNIFF_BYTES = 1024
+
+SNIFF_TIMEOUT = 3.0
+
+
+def url_ext_hls(url):
+    parts = urllib.parse.urlsplit(url)
+    hay = (parts.path + "?" + parts.query).lower()
+    return ".m3u" in hay or "m3u8" in hay
+
+
+def ffmpeg_auto_hls(ctype, final):
+    if any(t in ctype for t in HLS_CONTENT_TYPES):
+        return True
+
+    path = urllib.parse.urlsplit(final).path.lower()
+    return path.endswith(PLAYLIST_SUFFIXES)
+
+
+def probe_hls(url, ua):
+    req = urllib.request.Request(
+        url,
+        headers={
+            "User-Agent": ua,
+            "Accept-Encoding": "identity",
+            "Range": "bytes=0-" + str(SNIFF_BYTES - 1),
+            "Connection": "close",
+        },
+    )
+
+    with urllib.request.urlopen(
+        req,
+        timeout=SNIFF_TIMEOUT,
+    ) as resp:
+        ctype = (
+            resp.headers.get("Content-Type") or ""
+        ).lower()
+        final = resp.geturl()
+        try:
+            body = resp.read(SNIFF_BYTES)
+        except http.client.IncompleteRead as e:
+            body = e.partial
+
+    if body.startswith(b"\x1f\x8b"):
+        try:
+            body = zlib.decompressobj(31).decompress(body, SNIFF_BYTES)
+        except zlib.error:
+            return None, False
+
+    if body.startswith(b"\xef\xbb\xbf"):
+        body = body[3:]
+    body = body.lstrip()
+
+    if body.startswith(b"#EXTM3U"):
+        return True, not ffmpeg_auto_hls(ctype, final)
+
+    if body:
+        return False, False
+
+    if any(t in ctype for t in HLS_CONTENT_TYPES):
+        return True, False
+
+    if url_ext_hls(final):
+        return True, False
+
+    return None, False
+
+
+def detect_hls(url, ua):
+    parts = urllib.parse.urlsplit(url)
+
+    if parts.path.lower().endswith(PLAYLIST_SUFFIXES):
+        return True, False
+
+    if parts.scheme.lower() not in ("http", "https"):
+        return url_ext_hls(url), False
+
+    try:
+        sniffed, force = probe_hls(url, ua)
+    except (
+        OSError,
+        ValueError,
+        http.client.HTTPException,
+    ) as e:
+        print(
+            f"[Profilarr] HLS probe failed "
+            f"({type(e).__name__}: {e}); "
+            f"falling back to URL heuristics",
+            file=sys.stderr,
+        )
+        sniffed, force = None, False
+
+    if sniffed is not None:
+        return sniffed, force
+
+    return url_ext_hls(url), False
+
+
 def ffmpeg_cmd(
     profile,
     ua,
@@ -351,8 +463,7 @@ def ffmpeg_cmd(
 
     video_input, video_output = video_args(video, fps)
 
-    lower_url = url.lower()
-    hls_input = ".m3u" in lower_url or "m3u8" in lower_url
+    hls_input, force_demux = detect_hls(url, ua)
 
     c = [
         "ffmpeg",
@@ -385,6 +496,9 @@ def ffmpeg_cmd(
 
     # Hardware-accel / device input options must precede -i.
     c += video_input
+
+    if force_demux:
+        c += ["-f", "hls"]
 
     c += [
         "-i",

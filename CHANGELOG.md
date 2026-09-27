@@ -6,13 +6,24 @@ All notable changes to Profilarr are documented here.
 
 ### Fixed
 
-* HLS sources (`.m3u8` / `.m3u` URLs) no longer hang at startup with an
-  empty buffer and `Will reconnect at <playlist size>, error=End of file`
-  in the logs. `-reconnect_at_eof` treats the normal end of an HLS
-  playlist or segment as a dropped connection and re-requests the master
-  playlist forever, so no media is ever downloaded. The flag is now only
-  applied to non-HLS URLs, where EOF really does indicate a dropped live
-  TS source. Other reconnect options are unchanged.
+* HLS sources no longer hang at startup with an empty buffer and
+  `Will reconnect at <playlist size>, error=End of file` in the logs.
+  `-reconnect_at_eof` treats the normal end of an HLS playlist or
+  segment as a dropped connection and re-requests the master playlist
+  forever, so no media is ever downloaded. The flag is now only
+  applied to non-HLS sources, where EOF really does indicate a dropped
+  live TS source. Other reconnect options are unchanged.
+* HLS detection no longer relies on URL string matching. URLs whose path
+  ends in `.m3u8` / `.m3u` are still trusted immediately; any other
+  HTTP(S) URL is probed for the `#EXTM3U` playlist header (the same
+  check FFmpeg's own `hls_probe` uses), so extensionless playlists,
+  redirects, and proxy endpoints are classified correctly. If the
+  probe fails, detection falls back to path/query extension heuristics.
+  When the probe finds a playlist that FFmpeg would not auto-detect
+  (no standard playlist extension or MIME type), the supervisor now
+  passes `-f hls` so the input still opens; FFmpeg otherwise refuses
+  such inputs with `Not detecting m3u8/hls with non standard extension
+  and non standard mime type`.
 * Increased the FFmpeg probe budget from `-probesize 2M -analyzeduration 1M`
   to `5M` / `5M`. The smaller budget failed to resolve HE-AAC (implicit
   SBR) audio parameters on multi-variant HLS masters, producing
