@@ -336,9 +336,12 @@ INPUT_FORMATS = (
     "mpegts",
 )
 
+# Keep aligned with the MIME types recognized by FFmpeg's hls_probe.
 HLS_CONTENT_TYPES = (
-    "mpegurl",
-    "m3u8",
+    "application/vnd.apple.mpegurl",
+    "audio/mpegurl",
+    "audio/x-mpegurl",
+    "application/x-mpegurl",
 )
 
 SNIFF_BYTES = 1024
@@ -352,8 +355,13 @@ def url_ext_hls(url):
     return ".m3u" in hay or "m3u8" in hay
 
 
+def is_hls_content_type(ctype):
+    media_type = ctype.split(";", 1)[0].strip().lower()
+    return media_type in HLS_CONTENT_TYPES
+
+
 def ffmpeg_auto_hls(ctype, url):
-    if any(t in ctype for t in HLS_CONTENT_TYPES):
+    if is_hls_content_type(ctype):
         return True
 
     path = urllib.parse.urlsplit(url).path.lower()
@@ -401,7 +409,7 @@ def probe_hls(url, ua):
     if body:
         return False, False
 
-    if any(t in ctype for t in HLS_CONTENT_TYPES):
+    if is_hls_content_type(ctype):
         return True, False
 
     if url_ext_hls(final):

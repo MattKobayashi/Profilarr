@@ -21,6 +21,21 @@ SPEC.loader.exec_module(supervisor)
 
 USER_AGENT = "ProfilarrRegressionTests"
 
+SUPPORTED_HLS_MIME_TYPES = (
+    "application/vnd.apple.mpegurl",
+    "audio/mpegurl",
+    "audio/x-mpegurl",
+    "application/x-mpegurl",
+)
+
+UNSUPPORTED_HLS_MIME_TYPES = (
+    "application/mpegurl",
+    "application/m3u8",
+    "application/vnd.apple.mpegurl-extra",
+    "application/not-mpegurl",
+    'text/plain; filename="index.m3u8"',
+)
+
 
 @contextmanager
 def serve_http(routes):
@@ -230,6 +245,64 @@ class CommandTests(unittest.TestCase):
         self.assertNotIn("-f", cmd[:cmd.index("-i")])
 
 
+class MimeTests(unittest.TestCase):
+    def test_ffmpeg_supported_mime_types(self):
+        for content_type in SUPPORTED_HLS_MIME_TYPES:
+            with self.subTest(content_type=content_type):
+                self.assertTrue(supervisor.ffmpeg_auto_hls(
+                    content_type, "https://example.test/watch"
+                ))
+
+    def test_mime_matching_ignores_case_parameters_and_whitespace(self):
+        for content_type in SUPPORTED_HLS_MIME_TYPES:
+            with self.subTest(content_type=content_type):
+                self.assertTrue(supervisor.ffmpeg_auto_hls(
+                    "  " + content_type.upper() + " ; charset=UTF-8",
+                    "https://example.test/watch",
+                ))
+
+    def test_nonstandard_mime_substrings_do_not_enable_auto_detection(self):
+        for content_type in (*UNSUPPORTED_HLS_MIME_TYPES, ""):
+            with self.subTest(content_type=content_type):
+                self.assertFalse(supervisor.ffmpeg_auto_hls(
+                    content_type, "https://example.test/watch"
+                ))
+
+    def test_sniffed_playlists_force_hls_for_nonstandard_mime_types(self):
+        for content_type in UNSUPPORTED_HLS_MIME_TYPES:
+            with self.subTest(content_type=content_type):
+                routes = {"/watch": {
+                    "body": b"#EXTM3U\n#EXT-X-TARGETDURATION:1\n",
+                    "content_type": content_type,
+                }}
+                with serve_http(routes) as (origin, _requests):
+                    self.assertEqual(
+                        supervisor.detect_hls(origin + "/watch", USER_AGENT),
+                        (True, True),
+                    )
+
+    def test_empty_body_mime_fallback_uses_exact_allowlist(self):
+        for content_type in (*SUPPORTED_HLS_MIME_TYPES, *UNSUPPORTED_HLS_MIME_TYPES):
+            with self.subTest(content_type=content_type):
+                routes = {"/watch": {"body": b"", "content_type": content_type}}
+                expected = content_type in SUPPORTED_HLS_MIME_TYPES
+                with serve_http(routes) as (origin, _requests):
+                    self.assertEqual(
+                        supervisor.detect_hls(origin + "/watch", USER_AGENT),
+                        (expected, False),
+                    )
+
+    def test_non_playlist_body_overrides_standard_mime(self):
+        routes = {"/watch": {
+            "body": b"not a playlist", "content_type": "application/vnd.apple.mpegurl",
+        }}
+        with serve_http(routes) as (origin, _requests):
+            self.assertEqual(
+                supervisor.detect_hls(origin + "/watch", USER_AGENT),
+                (False, False),
+            )
+
+
 class CliTests(unittest.TestCase):
     def test_legacy_and_optional_input_format_arguments(self):
         args = [
@@ -378,6 +451,28 @@ class StreamingTests(unittest.TestCase):
                     self.assert_streams(cmd)
                     self.assertEqual(requests["/watch"], 2)
                     self.assertEqual(requests["/index.m3u8"], 2)
+
+    def test_mime_allowlist_matches_ffmpeg_auto_detection(self):
+        cases = [(mime, False) for mime in SUPPORTED_HLS_MIME_TYPES]
+        cases += [(mime, True) for mime in UNSUPPORTED_HLS_MIME_TYPES]
+        cases.append(("  APPLICATION/VND.APPLE.MPEGURL ; charset=UTF-8", False))
+        for content_type, force_hls in cases:
+            with self.subTest(content_type=content_type):
+                routes = dict(self.segments)
+                routes["/watch"] = {
+                    "body": self.playlist, "content_type": content_type,
+                }
+                with serve_http(routes) as (origin, _requests):
+                    cmd = supervisor.ffmpeg_cmd(
+                        "default", USER_AGENT, origin + "/watch", "copy", "copy"
+                    )
+                    input_args = cmd[:cmd.index("-i")]
+                    if force_hls:
+                        self.assertEqual(input_args[-2:], ["-f", "hls"])
+                    else:
+                        self.assertNotIn("-f", input_args)
+                    self.assertNotIn("-reconnect_at_eof", cmd)
+                    self.assert_streams(cmd)
 
 
 if __name__ == "__main__":

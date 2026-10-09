@@ -33,6 +33,10 @@ All notable changes to Profilarr are documented here.
 * Redirected playlists use the original input URL when deciding whether
   FFmpeg needs `-f hls`. A playlist suffix on a redirect target no longer
   masks a non-standard extension on the URL passed to FFmpeg.
+* HLS MIME checks now match FFmpeg's exact allowlist, ignoring case and
+  MIME parameters. Sniffed playlists served as `application/mpegurl`,
+  `application/m3u8`, or other non-standard types now receive `-f hls`
+  instead of incorrectly relying on FFmpeg's automatic detection.
 * Increased the FFmpeg probe budget from `-probesize 2M -analyzeduration 1M`
   to `5M` / `5M`. The smaller budget failed to resolve HE-AAC (implicit
   SBR) audio parameters on multi-variant HLS masters, producing
