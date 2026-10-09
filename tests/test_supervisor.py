@@ -158,6 +158,33 @@ class DetectionTests(unittest.TestCase):
                     )
             probe.assert_not_called()
 
+    def test_redirect_target_suffix_does_not_replace_input_suffix(self):
+        routes = {
+            "/watch": {"location": "/index.m3u8"},
+            "/index.m3u8": {"body": b"#EXTM3U\n#EXT-X-TARGETDURATION:1\n"},
+        }
+        with serve_http(routes) as (origin, requests):
+            self.assertEqual(
+                supervisor.detect_hls(origin + "/watch", USER_AGENT),
+                (True, True),
+            )
+            self.assertEqual(requests["/watch"], 1)
+            self.assertEqual(requests["/index.m3u8"], 1)
+
+    def test_redirect_with_standard_mime_keeps_auto_detection(self):
+        routes = {
+            "/watch": {"location": "/index.m3u8"},
+            "/index.m3u8": {
+                "body": b"#EXTM3U\n#EXT-X-TARGETDURATION:1\n",
+                "content_type": "application/vnd.apple.mpegurl",
+            },
+        }
+        with serve_http(routes) as (origin, _requests):
+            self.assertEqual(
+                supervisor.detect_hls(origin + "/watch", USER_AGENT),
+                (True, False),
+            )
+
 
 class CommandTests(unittest.TestCase):
     def test_ts_suffix_retains_reconnect_without_probe(self):
@@ -324,6 +351,33 @@ class StreamingTests(unittest.TestCase):
             self.assertEqual(requests["/watch"], 1)
             self.assert_streams(cmd)
             self.assertEqual(requests["/watch"], 2)
+
+    def test_redirected_playlist_uses_original_url_for_demuxer_choice(self):
+        for content_type, force_hls in (
+            ("application/octet-stream", True),
+            ("application/vnd.apple.mpegurl", False),
+        ):
+            with self.subTest(content_type=content_type):
+                routes = dict(self.segments)
+                routes["/watch"] = {"location": "/index.m3u8"}
+                routes["/index.m3u8"] = {
+                    "body": self.playlist, "content_type": content_type,
+                }
+                with serve_http(routes) as (origin, requests):
+                    url = origin + "/watch"
+                    cmd = supervisor.ffmpeg_cmd(
+                        "default", USER_AGENT, url, "copy", "copy"
+                    )
+                    self.assertEqual(cmd[cmd.index("-i") + 1], url)
+                    input_args = cmd[:cmd.index("-i")]
+                    if force_hls:
+                        self.assertEqual(input_args[-2:], ["-f", "hls"])
+                    else:
+                        self.assertNotIn("-f", input_args)
+                    self.assertNotIn("-reconnect_at_eof", cmd)
+                    self.assert_streams(cmd)
+                    self.assertEqual(requests["/watch"], 2)
+                    self.assertEqual(requests["/index.m3u8"], 2)
 
 
 if __name__ == "__main__":

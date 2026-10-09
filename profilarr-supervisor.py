@@ -352,11 +352,11 @@ def url_ext_hls(url):
     return ".m3u" in hay or "m3u8" in hay
 
 
-def ffmpeg_auto_hls(ctype, final):
+def ffmpeg_auto_hls(ctype, url):
     if any(t in ctype for t in HLS_CONTENT_TYPES):
         return True
 
-    path = urllib.parse.urlsplit(final).path.lower()
+    path = urllib.parse.urlsplit(url).path.lower()
     return path.endswith(PLAYLIST_SUFFIXES)
 
 
@@ -395,7 +395,8 @@ def probe_hls(url, ua):
     body = body.lstrip()
 
     if body.startswith(b"#EXTM3U"):
-        return True, not ffmpeg_auto_hls(ctype, final)
+        # FFmpeg probes the original input filename, not the redirect target.
+        return True, not ffmpeg_auto_hls(ctype, url)
 
     if body:
         return False, False

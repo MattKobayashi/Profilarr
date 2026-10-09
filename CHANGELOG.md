@@ -30,6 +30,9 @@ All notable changes to Profilarr are documented here.
   supervisor argument also bypasses probing for extensionless single-use
   URLs and forces the corresponding input format. Existing commands retain
   automatic detection when the argument is omitted.
+* Redirected playlists use the original input URL when deciding whether
+  FFmpeg needs `-f hls`. A playlist suffix on a redirect target no longer
+  masks a non-standard extension on the URL passed to FFmpeg.
 * Increased the FFmpeg probe budget from `-probesize 2M -analyzeduration 1M`
   to `5M` / `5M`. The smaller budget failed to resolve HE-AAC (implicit
   SBR) audio parameters on multi-variant HLS masters, producing
