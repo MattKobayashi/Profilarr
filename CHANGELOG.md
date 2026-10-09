@@ -14,16 +14,22 @@ All notable changes to Profilarr are documented here.
   applied to non-HLS sources, where EOF really does indicate a dropped
   live TS source. Other reconnect options are unchanged.
 * HLS detection no longer relies on URL string matching. URLs whose path
-  ends in `.m3u8` / `.m3u` are still trusted immediately; any other
-  HTTP(S) URL is probed for the `#EXTM3U` playlist header (the same
-  check FFmpeg's own `hls_probe` uses), so extensionless playlists,
-  redirects, and proxy endpoints are classified correctly. If the
-  probe fails, detection falls back to path/query extension heuristics.
+  ends in `.m3u8` / `.m3u` are still trusted immediately; MPEG-TS paths
+  also skip probing. Other HTTP(S) URLs are probed for the `#EXTM3U`
+  playlist header (the same check FFmpeg's own `hls_probe` uses), so
+  extensionless playlists, redirects, and proxy endpoints are classified
+  correctly. If the probe fails, detection falls back to path/query
+  extension heuristics.
   When the probe finds a playlist that FFmpeg would not auto-detect
   (no standard playlist extension or MIME type), the supervisor now
   passes `-f hls` so the input still opens; FFmpeg otherwise refuses
   such inputs with `Not detecting m3u8/hls with non standard extension
   and non standard mime type`.
+* Single-use MPEG-TS URLs with standard TS suffixes are no longer consumed
+  by a preliminary detection request. An optional trailing `hls` / `mpegts`
+  supervisor argument also bypasses probing for extensionless single-use
+  URLs and forces the corresponding input format. Existing commands retain
+  automatic detection when the argument is omitted.
 * Increased the FFmpeg probe budget from `-probesize 2M -analyzeduration 1M`
   to `5M` / `5M`. The smaller budget failed to resolve HE-AAC (implicit
   SBR) audio parameters on multi-variant HLS masters, producing
@@ -179,4 +185,3 @@ Intel and AMD profiles remain available for hardware-specific validation on syst
 * Dispatcharr Stream Profile integration.
 * FFmpeg and CVLC streaming pipeline.
 * Hardware encoder support.
-

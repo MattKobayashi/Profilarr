@@ -322,6 +322,20 @@ PLAYLIST_SUFFIXES = (
     ".m3u",
 )
 
+MPEGTS_SUFFIXES = (
+    ".ts",
+    ".m2t",
+    ".m2ts",
+    ".mts",
+    ".mpegts",
+)
+
+INPUT_FORMATS = (
+    "auto",
+    "hls",
+    "mpegts",
+)
+
 HLS_CONTENT_TYPES = (
     "mpegurl",
     "m3u8",
@@ -395,11 +409,24 @@ def probe_hls(url, ua):
     return None, False
 
 
-def detect_hls(url, ua):
-    parts = urllib.parse.urlsplit(url)
+def detect_hls(url, ua, input_format="auto"):
+    if input_format not in INPUT_FORMATS:
+        raise ValueError(
+            "unknown input format: " + input_format
+        )
 
-    if parts.path.lower().endswith(PLAYLIST_SUFFIXES):
+    # Explicit formats avoid consuming single-use, extensionless URLs.
+    if input_format != "auto":
+        return input_format == "hls", input_format == "hls"
+
+    parts = urllib.parse.urlsplit(url)
+    path = parts.path.lower()
+
+    if path.endswith(PLAYLIST_SUFFIXES):
         return True, False
+
+    if path.endswith(MPEGTS_SUFFIXES):
+        return False, False
 
     if parts.scheme.lower() not in ("http", "https"):
         return url_ext_hls(url), False
@@ -432,6 +459,7 @@ def ffmpeg_cmd(
     video,
     audio,
     fps="copy",
+    input_format="auto",
 ):
     if profile not in ALLOWED:
         raise ValueError(
@@ -463,7 +491,7 @@ def ffmpeg_cmd(
 
     video_input, video_output = video_args(video, fps)
 
-    hls_input, force_demux = detect_hls(url, ua)
+    hls_input, force_demux = detect_hls(url, ua, input_format)
 
     c = [
         "ffmpeg",
@@ -499,6 +527,8 @@ def ffmpeg_cmd(
 
     if force_demux:
         c += ["-f", "hls"]
+    elif input_format == "mpegts":
+        c += ["-f", "mpegts"]
 
     c += [
         "-i",
@@ -579,17 +609,19 @@ def cvlc_cmd(cache="6000"):
 
 
 def main():
-    if len(sys.argv) != 8:
+    if len(sys.argv) not in (8, 9):
         print(
             "usage: profilarr-supervisor.py "
             "<profile_key> <userAgent> <streamUrl> "
             "<videoOverride> <audioOverride> "
-            "<fpsOverride> <networkCaching>",
+            "<fpsOverride> <networkCaching> "
+            "[inputFormat: auto|hls|mpegts]",
             file=sys.stderr,
         )
         return 2
 
-    profile, ua, url, video, audio, fps, cache = sys.argv[1:]
+    profile, ua, url, video, audio, fps, cache = sys.argv[1:8]
+    input_format = sys.argv[8] if len(sys.argv) == 9 else "auto"
 
     try:
         set_pdeathsig()
@@ -638,6 +670,7 @@ def main():
                     video,
                     audio,
                     fps,
+                    input_format,
                 ),
                 stdin=subprocess.DEVNULL,
                 stdout=subprocess.PIPE,

@@ -107,6 +107,30 @@ The Stream Profile launches the Profilarr supervisor and passes:
 * FPS mode
 * CVLC network cache
 
+#### Input detection and single-use URLs
+
+Automatic detection does not make an extra request for playlist paths ending
+in `.m3u8` / `.m3u` or MPEG-TS paths ending in `.ts`, `.m2t`, `.m2ts`, `.mts`,
+or `.mpegts`. Other HTTP(S) URLs are opened once for detection and again by
+FFmpeg. This consumes single-use tokens on extensionless links.
+
+For a single-use URL without a recognized suffix, configure a dedicated
+Stream Profile with an optional final **input format** argument after the
+network cache. Use `mpegts` for raw TS or `hls` for a playlist. Both bypass
+the detection request and force the corresponding FFmpeg input demuxer;
+`auto` is the default when the argument is omitted.
+
+For example, a passthrough profile using `/data/plugins/profilarr/profilarr.sh`
+can use these parameters for a single-use raw TS source:
+
+```text
+'{userAgent}' '{streamUrl}' 'copy' 'copy' 'copy' '6000' 'mpegts'
+```
+
+Use this profile only for sources of that format. If editing a generated
+Profilarr profile, lock it so **Apply & Synchronize** does not overwrite the
+custom parameters.
+
 ### Output Profile
 
 Example:
@@ -286,6 +310,16 @@ CPU Source FPS is supported.
 The current CPU profiles do not apply FPS overrides.
 
 ## Testing
+
+Run the dependency-free regression suite with:
+
+```bash
+python3 -B -m unittest discover -s tests -v
+```
+
+Streaming tests use local HTTP fixtures and FFmpeg when it is available;
+they are skipped when FFmpeg is not installed. Detection and command tests
+always run.
 
 NVIDIA profiles have been tested with:
 
